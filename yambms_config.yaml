@@ -1,0 +1,453 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  YamBMS — Konfiguracja dla LilyGo T-Connect (ESP32-S3)                    ║
+# ║  3x Seplos V3 (sniffer RS485_1) + 2x Seplos V2 (Modbus RS485_2)          ║
+# ║  + CAN bus do invertera Victron                                            ║
+# ╠══════════════════════════════════════════════════════════════════════════════╣
+# ║  Wersja   : 1.6.0                                                         ║
+# ║  Data     : 2026.04.11                                                     ║
+# ║  Projekt  : https://github.com/Sleeper85/esphome-yambms                   ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+#
+# OPIS KONFIGURACJI:
+# - Płytka: LilyGo T-Connect (ESP32-S3-R8, 8MB PSRAM, 16MB Flash)
+# - RS485 Port 1 (GPIO4/5)  → 3x Seplos V3 w trybie sniffer (pasywne nasłuchiwanie)
+# - RS485 Port 2 (GPIO6/7)  → 2x Seplos V2 w trybie Modbus (aktywne odpytywanie)
+# - CAN Port 4   (GPIO9/10) → Inverter Victron (protokół CAN 500kbps)
+#
+# WYMAGANIA:
+# - Plik secrets.yaml z danymi WiFi (patrz sekcja WiFi poniżej)
+# - ESPHome w wersji 2024.x lub nowszej
+# - Rezystory terminacyjne 120Ω na obu końcach magistrali RS485 i CAN
+#
+# NUMERACJA BMS:
+# BMS 1-3 = Seplos V3 (sniffer, RS485_1)
+# BMS 4-5 = Seplos V2 (Modbus, RS485_2)
+# WAŻNE: Numeracja bms_id musi być ciągła (1,2,3,4,5)!
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  KONFIGURACJA SIECI WiFi                                                   ║
+# ║  Opcjonalnie: statyczny adres IP (odkomentuj jeśli potrzebujesz)          ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# Jeśli chcesz ustawić statyczny IP, odkomentuj poniższe linie:
+# wifi:
+#   manual_ip:
+#     static_ip: 192.168.1.100    # <- Zmień na swój adres IP
+#     gateway: 192.168.1.1        # <- Zmień na adres bramy
+#     subnet: 255.255.255.0
+#     dns1: 8.8.8.8
+#     dns2: 8.8.4.4
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  LOGGER — Konfiguracja logowania                                           ║
+# ║  Poziomy: VERBOSE / DEBUG / INFO / WARN / ERROR                            ║
+# ║  INFO — zalecany do codziennego użytku                                     ║
+# ║  DEBUG — do rozwiązywania problemów z komunikacją                          ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+logger:
+  level: INFO
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  OTA — Aktualizacja firmware bezprzewodowo (Over The Air)                  ║
+# ║  Umożliwia wgrywanie nowego firmware bez kabla USB                         ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+ota:
+  - platform: esphome
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  API — Natywne API ESPHome do komunikacji z Home Assistant                 ║
+# ║  reboot_timeout: 0s — ESP32 nie restartuje się gdy HA jest niedostępny     ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+api:
+  reboot_timeout: 0s
+
+# Alternatywnie: MQTT (odkomentuj poniżej i usuń sekcję api: powyżej)
+# mqtt:
+#   broker: !secret mqtt_host
+#   username: !secret mqtt_username
+#   password: !secret mqtt_password
+#   id: mqtt_client
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  SUBSTITUTIONS — Globalne ustawienia i parametry YamBMS                    ║
+# ║                                                                            ║
+# ║  ⚠️  WAŻNE: Dostosuj parametry napięć i prądów do swoich baterii!         ║
+# ║  Poniższe wartości są przykładowe dla ogniw LFP 16S (51.2V nominalnie).   ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+substitutions:
+
+  # ┌──────────────────────────────────────┐
+  # │ Nazwa urządzenia                     │
+  # └──────────────────────────────────────┘
+  # friendly_name — prefiks wyświetlany w Home Assistant przed nazwą encji
+  friendly_name: 'YamBMS'
+  # hostname — nazwa DNS urządzenia w sieci (musi być unikalna!)
+  hostname: 'yambms-seplos'
+  # name — dodatkowy prefiks (można zostawić pusty)
+  name: ''
+
+  # ┌──────────────────────────────────────┐
+  # │ Ustawienia YamBMS (Virtual BMS)      │
+  # │ Logika ładowania i agregacji danych  │
+  # └──────────────────────────────────────┘
+
+  # Identyfikator instancji YamBMS
+  yambms_id: 'yambms1'
+  yambms_name: 'YamBMS 1'
+
+  # Interwał aktualizacji danych agregowanych (1s = co sekundę)
+  yambms_update_interval: '1s'
+
+  # Tryb wyświetlania suwaków w HA: 'slider' lub 'box'
+  yambms_input_number_mode: 'slider'
+
+  # ┌──────────────────────────────────────┐
+  # │ Chemia baterii i konfiguracja cel    │
+  # │ ⚠️ DOSTOSUJ DO SWOICH BATERII!      │
+  # └──────────────────────────────────────┘
+
+  # Typ chemii ogniw: 1-LFP | 2-Li-ion | 3-LTO
+  yambms_battery_chemistry: '1'
+
+  # Liczba ogniw w szeregu (16S = standardowa konfiguracja 48V LFP)
+  yambms_cell_count: '16'
+
+  # Napięcie Bulk/Absorption — napięcie ładowania głównego
+  # LFP 16S: 55.2V = 3.45V/ogniwo (standardowe)
+  yambms_bulk_v: '55.2'
+
+  # Napięcie Float — napięcie podtrzymania po zakończeniu ładowania
+  # LFP 16S: 53.6V = 3.35V/ogniwo
+  yambms_float_v: '53.6'
+
+  # Napięcie Rebulk — poniżej tego napięcia rozpoczyna się nowy cykl Bulk
+  # LFP 16S: 52.8V = 3.3V/ogniwo
+  yambms_rebulk_v: '52.8'
+
+  # Maksymalny czas (w minutach) trwania fazy cut-off przed zakończeniem ładowania
+  # Timer można wyłączyć przełącznikiem w HA
+  yambms_eoc_timer: '30'
+
+  # Czas (w sekundach) w którym warunki końca ładowania muszą być spełnione
+  yambms_cutoff_timer: '60'
+
+  # ┌──────────────────────────────────────┐
+  # │ Limity prądowe                       │
+  # │ ⚠️ DOSTOSUJ DO SWOICH BATERII!      │
+  # └──────────────────────────────────────┘
+
+  # Maksymalny prąd ładowania żądany przez YamBMS (suma proporcjonalna do liczby BMS)
+  # Dla 5x BMS po 100A każdy: sugerowane 500A (lub mniej jeśli inverter nie obsługuje)
+  yambms_max_requested_charge_current: '500'
+
+  # Maksymalny prąd rozładowania żądany przez YamBMS
+  yambms_max_requested_discharge_current: '500'
+
+  # ┌──────────────────────────────────────────────────────────────────────────┐
+  # │ Ograniczenie prądowe oparte na temperaturze                             │
+  # │ Współczynnik stosowany do pojemności baterii (Ah), nie do prądu max.    │
+  # │ Przykład: 280Ah × 0.5 = 140A max                                       │
+  # │ Można wyłączyć przełącznikiem "Temperature-based current limitation"    │
+  # └──────────────────────────────────────────────────────────────────────────┘
+
+  # Tabela: Temperatura °C → Współczynnik ładowania (0.0C do 1.0C)
+  yambms_charging_rate_table: |
+    {
+      { -0.1, 0.00 },
+      {  0.0, 0.05 },
+      {  5.0, 0.12 },
+      { 10.0, 0.30 },
+      { 20.0, 0.50 },
+      { 25.0, 0.50 },
+      { 45.0, 0.50 },
+      { 50.0, 0.50 },
+      { 55.0, 0.50 },
+      { 60.0, 0.00 }
+    }
+
+  # Tabela: Temperatura °C → Współczynnik rozładowania (0.0C do 1.0C)
+  yambms_discharging_rate_table: |
+    {
+      {-30.0, 0.00 },
+      {-20.0, 0.50 },
+      {-10.0, 0.50 },
+      { -5.0, 0.50 },
+      {  0.0, 0.50 },
+      {  5.0, 0.50 },
+      { 45.0, 0.50 },
+      { 50.0, 0.50 },
+      { 55.0, 0.50 },
+      { 60.0, 0.00 }
+    }
+
+  # ┌──────────────────────────────────────┐
+  # │ Interwały odświeżania danych        │
+  # └──────────────────────────────────────┘
+
+  # Częstotliwość odświeżania danych z shunta (jeśli używany)
+  shunt_update_interval: '3s'
+
+  # Częstotliwość odświeżania danych z BMS
+  # UWAGA: wartość poniżej '3s' może powodować problemy!
+  bms_update_interval: '3s'
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  PACKAGES — Importy modułów konfiguracji                                   ║
+# ║  Pakiety są pobierane automatycznie z repozytorium GitHub                  ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+packages:
+
+  # ╔════════════════════════════════════════════════════════════════════════════╗
+  # ║  PŁYTKA — LilyGo T-Connect (ESP32-S3)                                   ║
+  # ║  Definiuje: piny GPIO, WiFi, logger, LED APA102, SPI                     ║
+  # ║  Piny komunikacyjne:                                                     ║
+  # ║    RS485_1: TX=GPIO4, RX=GPIO5  (Port 1 — Seplos V3 sniffer)           ║
+  # ║    RS485_2: TX=GPIO6, RX=GPIO7  (Port 2 — Seplos V2 Modbus)            ║
+  # ║    RS485_3: TX=GPIO17, RX=GPIO18 (Port 3 — wolny/zapasowy)             ║
+  # ║    CAN:     TX=GPIO9, RX=GPIO10 (Port 4 — Victron inverter)            ║
+  # ╚════════════════════════════════════════════════════════════════════════════╝
+
+  board:
+    url: https://github.com/Sleeper85/esphome-yambms
+    ref: main
+    refresh: 60min
+    files:
+      - path: 'packages/board/board_ESP32-S3_LilyGo-T-Connect.yaml'
+
+
+  # ╔════════════════════════════════════════════════════════════════════════════╗
+  # ║  INTERFEJSY KOMUNIKACYJNE                                                ║
+  # ║                                                                          ║
+  # ║  UART 1 (uart_esp_1) → RS485 Port 1 → Seplos V3 sniffer (19200 baud)   ║
+  # ║  UART 2 (uart_esp_2) → RS485 Port 2 → Seplos V2 Modbus  (9600 baud)    ║
+  # ║  CAN    (canbus_inverter_1) → Port 4 → Victron (500 kbps)              ║
+  # ║                                                                          ║
+  # ║  PSRAM — wymagany dla 5 BMS (dużo encji w pamięci)                      ║
+  # ╚════════════════════════════════════════════════════════════════════════════╝
+
+  board_options:
+    url: https://github.com/Sleeper85/esphome-yambms
+    ref: main
+    refresh: 60min
+    files:
+      # UART 1 — dla Seplos V3 sniffer (Port RS485 nr 1)
+      # Baud rate zostanie nadpisany przez pakiet sniffer na 19200
+      - path: 'packages/board/board_options_itf_uart_esp_1.yaml'
+
+      # UART 2 — dla Seplos V2 Modbus (Port RS485 nr 2)
+      # Baud rate zostanie nadpisany przez pakiet Modbus na 9600
+      - path: 'packages/board/board_options_itf_uart_esp_2.yaml'
+
+      # CAN bus — wbudowany transceiver ESP32 TWAI (Port CAN nr 4)
+      # Komunikacja z inverterem Victron po protokole CAN 500kbps
+      - path: 'packages/board/board_options_itf_canbus_esp32_can.yaml'
+        vars:
+          canbus_node_id: 'canbus_inverter_1'
+
+      # PSRAM — optymalizacja pamięci dla ESP32-S3 z 8MB PSRAM
+      # ZALECANE dla konfiguracji z 5 BMS (wiele encji w pamięci)
+      - path: 'packages/board/board_options_PSRAM_octal_80Mhz.yaml'
+
+      # Web Server — opcjonalny panel webowy na ESP32 (odkomentuj jeśli chcesz)
+      # - path: 'packages/yambms/yambms_web_server.yaml'
+
+
+  # ╔════════════════════════════════════════════════════════════════════════════╗
+  # ║  BMS — Konfiguracja systemów zarządzania bateriami                       ║
+  # ║                                                                          ║
+  # ║  GRUPA 1: Seplos V3 × 3 sztuki (RS485_1, sniffer mode)                 ║
+  # ║  ─────────────────────────────────────────────────────                   ║
+  # ║  Tryb sniffer = pasywne nasłuchiwanie komunikacji Master-Slave           ║
+  # ║  ESP32 tylko "podsłuchuje" dane wymieniane między BMS-ami V3.            ║
+  # ║  Wymaga podłączenia do magistrali RS485 między Master a Slave.           ║
+  # ║  Prefiksy bms0/bms1/bms2 odpowiadają indeksom w parserze — NIE ZMIENIAJ!║
+  # ║                                                                          ║
+  # ║  GRUPA 2: Seplos V2 × 2 sztuki (RS485_2, Modbus mode)                  ║
+  # ║  ─────────────────────────────────────────────────────                   ║
+  # ║  Tryb Modbus = aktywne odpytywanie każdego BMS po adresie               ║
+  # ║  ESP32 wysyła zapytania Modbus i odbiera odpowiedzi.                    ║
+  # ║  Adresy BMS ustawiane przez DIP switch na każdym module Seplos V2.       ║
+  # ╚════════════════════════════════════════════════════════════════════════════╝
+
+  bms:
+    url: https://github.com/Sleeper85/esphome-yambms
+    ref: main
+    refresh: 60min
+    files:
+
+      # ┌────────────────────────────────────────────────────────────────────────┐
+      # │  GRUPA 1: Seplos V3 — Parser sniffer (wspólny dla wszystkich V3)     │
+      # │  Konfiguruje komponent seplos_v3_sniffer na UART 1                   │
+      # │  seplos_bms_count: '3' — liczba BMS V3 w grupie Master-Slave         │
+      # │  Baud rate: 19200 (standardowy dla Seplos V3)                        │
+      # │  Update interval: 3s (co ile sekund odświeżać dane)                  │
+      # └────────────────────────────────────────────────────────────────────────┘
+      - path: 'packages/bms/bms_combine_SEPLOS_V3_RS485_modbus_sniffer.yaml'
+        vars:
+          seplos_uart_id: 'uart_esp_1'
+          seplos_baud_rate: '19200'
+          seplos_bms_count: '3'
+          seplos_update_interval: '3'
+
+      # ┌────────────────────────────────────────────────────────────────────────┐
+      # │  Seplos V3 — BMS 1 (Master)                                          │
+      # │  bms_id: '1' — pierwszy BMS w systemie YamBMS                        │
+      # │  bms_prefix: 'bms0' — indeks w parserze sniffer (NIE ZMIENIAJ!)     │
+      # └────────────────────────────────────────────────────────────────────────┘
+      - path: 'packages/bms/bms_combine_SEPLOS_V3_RS485_sniffer_bms_full.yaml'
+        vars:
+          bms_id: '1'
+          bms_prefix: 'bms0'                    # indeks parsera — NIE ZMIENIAJ!
+          bms_name: 'Seplos V3 BMS 1'
+          bms_cell_ovp: '3.650'                  # napięcie zabezpieczenia przed przeładowaniem ogniwa [V]
+          bms_cell_uvp: '2.800'                  # napięcie zabezpieczenia przed głębokim rozładowaniem [V]
+          bms_balance_trigger_voltage: '0.010'   # różnica napięć wyzwalająca balansowanie [V]
+
+      # ┌────────────────────────────────────────────────────────────────────────┐
+      # │  Seplos V3 — BMS 2 (Slave 1)                                        │
+      # │  bms_prefix: 'bms1' — indeks w parserze sniffer (NIE ZMIENIAJ!)     │
+      # └────────────────────────────────────────────────────────────────────────┘
+      - path: 'packages/bms/bms_combine_SEPLOS_V3_RS485_sniffer_bms_full.yaml'
+        vars:
+          bms_id: '2'
+          bms_prefix: 'bms1'                    # indeks parsera — NIE ZMIENIAJ!
+          bms_name: 'Seplos V3 BMS 2'
+          bms_cell_ovp: '3.650'
+          bms_cell_uvp: '2.800'
+          bms_balance_trigger_voltage: '0.010'
+
+      # ┌────────────────────────────────────────────────────────────────────────┐
+      # │  Seplos V3 — BMS 3 (Slave 2)                                        │
+      # │  bms_prefix: 'bms2' — indeks w parserze sniffer (NIE ZMIENIAJ!)     │
+      # └────────────────────────────────────────────────────────────────────────┘
+      - path: 'packages/bms/bms_combine_SEPLOS_V3_RS485_sniffer_bms_full.yaml'
+        vars:
+          bms_id: '3'
+          bms_prefix: 'bms2'                    # indeks parsera — NIE ZMIENIAJ!
+          bms_name: 'Seplos V3 BMS 3'
+          bms_cell_ovp: '3.650'
+          bms_cell_uvp: '2.800'
+          bms_balance_trigger_voltage: '0.010'
+
+      # ┌────────────────────────────────────────────────────────────────────────┐
+      # │  GRUPA 2: Seplos V2 — Parser Modbus (wspólny dla wszystkich V2)      │
+      # │  Konfiguruje komponent seplos_modbus na UART 2                       │
+      # │  Baud rate: 9600 (standardowy dla Seplos V2)                         │
+      # └────────────────────────────────────────────────────────────────────────┘
+      - path: 'packages/bms/bms_combine_SEPLOS_V1_V2_RS485_modbus.yaml'
+        vars:
+          seplos_modbus_uart_id: 'uart_esp_2'
+          seplos_modbus_baud_rate: '9600'
+
+      # ┌────────────────────────────────────────────────────────────────────────┐
+      # │  Seplos V2 — BMS 4 (Master grupy V2)                                │
+      # │  bms_id: '4' — kontynuacja numeracji po BMS 1-3 (V3)               │
+      # │  bms_address: '0x01' — adres Modbus ustawiony DIP switchem           │
+      # │  bms_protocol_version: '0x20' — wersja protokołu Seplos              │
+      # └────────────────────────────────────────────────────────────────────────┘
+      - path: 'packages/bms/bms_combine_SEPLOS_V1_V2_RS485_bms_full.yaml'
+        vars:
+          bms_id: '4'
+          bms_name: 'Seplos V2 BMS 4'
+          bms_address: '0x01'                    # adres Modbus (DIP switch) — BMS Master
+          bms_protocol_version: '0x20'           # 0x20=Seplos, 0x26=Boqiang
+          bms_max_charge_current: '100'          # maks. prąd ładowania [A]
+          bms_max_discharge_current: '100'       # maks. prąd rozładowania [A]
+          bms_cell_ovp: '3.650'                  # napięcie zabezpieczenia OVP [V]
+          bms_cell_uvp: '2.800'                  # napięcie zabezpieczenia UVP [V]
+          bms_balance_trigger_voltage: '0.010'   # próg wyzwolenia balansowania [V]
+
+      # ┌────────────────────────────────────────────────────────────────────────┐
+      # │  Seplos V2 — BMS 5 (Slave grupy V2)                                 │
+      # │  bms_address: '0x02' — drugi adres Modbus (DIP switch)               │
+      # └────────────────────────────────────────────────────────────────────────┘
+      - path: 'packages/bms/bms_combine_SEPLOS_V1_V2_RS485_bms_full.yaml'
+        vars:
+          bms_id: '5'
+          bms_name: 'Seplos V2 BMS 5'
+          bms_address: '0x02'                    # adres Modbus (DIP switch) — BMS Slave
+          bms_protocol_version: '0x20'           # 0x20=Seplos, 0x26=Boqiang
+          bms_max_charge_current: '100'          # maks. prąd ładowania [A]
+          bms_max_discharge_current: '100'       # maks. prąd rozładowania [A]
+          bms_cell_ovp: '3.650'                  # napięcie zabezpieczenia OVP [V]
+          bms_cell_uvp: '2.800'                  # napięcie zabezpieczenia UVP [V]
+          bms_balance_trigger_voltage: '0.010'   # próg wyzwolenia balansowania [V]
+
+
+  # ╔════════════════════════════════════════════════════════════════════════════╗
+  # ║  YamBMS — Rdzeń systemu agregacji (Virtual BMS)                         ║
+  # ║                                                                          ║
+  # ║  Ten pakiet odpowiada za:                                                ║
+  # ║  • Agregację danych ze wszystkich 5 BMS                                 ║
+  # ║  • Obliczanie łącznych wartości (napięcie, prąd, SoC, temperatura)      ║
+  # ║  • Logikę ładowania (Bulk → Absorption → Float → Rebulk)               ║
+  # ║  • Zarządzanie alarmami i ostrzeżeniami                                ║
+  # ║  • Prezentację jako jeden wirtualny system bateryjny                    ║
+  # ╚════════════════════════════════════════════════════════════════════════════╝
+
+  yambms:
+    url: https://github.com/Sleeper85/esphome-yambms
+    ref: main
+    refresh: 60min
+    files:
+      - path: 'packages/yambms/yambms.yaml'
+
+
+  # ╔════════════════════════════════════════════════════════════════════════════╗
+  # ║  CAN BUS — Komunikacja z inverterem Victron                             ║
+  # ║                                                                          ║
+  # ║  Wysyła zagregowane dane BMS do invertera przez CAN bus:                ║
+  # ║  • Frame 0x35E — nazwa producenta (PYLON/Victron)                       ║
+  # ║  • Frame 0x351 — limity napięcia i prądu (CVL, CCL, DCL)               ║
+  # ║  • Frame 0x355 — SoC i SoH                                             ║
+  # ║  • Frame 0x356 — napięcie, prąd, temperatura                           ║
+  # ║  • Frame 0x359/35C — alarmy i ostrzeżenia                              ║
+  # ║  • Frame 0x35A — informacje o modułach                                  ║
+  # ║                                                                          ║
+  # ║  canbus_link_timer: '5s' — czas bez odpowiedzi (0x305) = link down     ║
+  # ║                                                                          ║
+  # ║  ⚠️ W HA wybierz protokół CAN: "Victron" lub "PYLON 1.2"              ║
+  # ║     oraz nazwę BMS: "Victron" (w zależności od invertera)               ║
+  # ╚════════════════════════════════════════════════════════════════════════════╝
+
+  canbus:
+    url: https://github.com/Sleeper85/esphome-yambms
+    ref: main
+    refresh: 60min
+    files:
+      - path: 'packages/yambms/yambms_canbus.yaml'
+        vars:
+          canbus_id: 'canbus1'
+          canbus_name: 'CANBUS Victron'
+          canbus_node_id: 'canbus_inverter_1'
+          canbus_light_id: 'esp_light'
+          canbus_link_timer: '5s'
+
+
+  # ╔════════════════════════════════════════════════════════════════════════════╗
+  # ║  DEBUG — Informacje diagnostyczne (opcjonalnie)                         ║
+  # ║  Włącz aby monitorować zużycie RAM/PSRAM, czas pracy, WiFi RSSI itd.    ║
+  # ║  PSRAM size: 8388608 = 8MB (dla LilyGo T-Connect)                      ║
+  # ╚════════════════════════════════════════════════════════════════════════════╝
+
+  debug:
+    url: https://github.com/Sleeper85/esphome-yambms
+    ref: main
+    refresh: 60min
+    files:
+      - path: packages/base/device_debug_ESP32.yaml
+        vars:
+          debug_name: 'Debug'
+          debug_update_interval: '5s'
+          debug_psram_size: '8388608'   # 8MB PSRAM w LilyGo T-Connect
