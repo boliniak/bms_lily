@@ -192,6 +192,9 @@ Każdy BMS Seplos V2 w trybie Modbus musi mieć unikalny adres ustawiony za pomo
 
 ## 5. Instalacja ESPHome
 
+> **Wymagana wersja ESPHome:** `2025.11.0` lub nowsza (zalecana: najnowsza stabilna).
+> Starsze wersje mogą zwracać mylące błędy walidacji YAML dla pakietów YamBMS.
+
 ### Opcja A: ESPHome jako dodatek Home Assistant (zalecana)
 
 1. Otwórz **Home Assistant** → **Ustawienia** → **Dodatki** → **Sklep z dodatkami**
@@ -252,6 +255,14 @@ domain: ".local"
 ### Krok 2: Skopiuj plik konfiguracyjny
 
 Skopiuj plik `yambms_config.yaml` do katalogu konfiguracji ESPHome. Możesz go nazwać dowolnie, np. `yambms-seplos.yaml`.
+
+### Krok 2a: Tryb pakietów (KLUCZOWE)
+
+Ta konfiguracja działa w **trybie zdalnym (remote packages)** — sekcja `packages:` używa `url:` i `files:`.
+
+- ✅ **Tryb zdalny (aktualny):** **NIE kopiujesz** lokalnie folderu `packages/`.
+- ✅ Wystarczy internet + poprawna wersja ESPHome.
+- ⚠️ Jeśli przejdziesz na **tryb lokalny** (`!include packages/...`), wtedy musisz skopiować **CAŁY** katalog `packages/` z repozytorium YamBMS, nie pojedyncze pliki.
 
 ### Krok 3: Zweryfikuj parametry
 
@@ -423,6 +434,23 @@ Jeśli odkomentowałeś `yambms_web_server.yaml`, dostępny jest panel webowy:
 ---
 
 ## 11. Troubleshooting — typowe problemy
+
+### ❌ Problem: `packages/yambms/yambms_web_server.yaml is not a valid YAML file`
+
+**Diagnoza:**
+Najczęściej to **nie** jest uszkodzony plik `yambms_web_server.yaml`, tylko problem środowiska lub trybu importu:
+
+1. ESPHome jest za stare (poniżej `2025.11.0`)
+2. Pomylenie trybu zdalnego i lokalnego pakietów
+3. Próba użycia lokalnego `packages/...` bez pełnego katalogu `packages/`
+
+**Kroki naprawy:**
+1. Zaktualizuj ESPHome do najnowszej wersji stabilnej
+2. Używaj konfiguracji `url + files` (tryb zdalny) — bez lokalnego `packages/`
+3. Jeśli wybierasz tryb lokalny, skopiuj cały `packages/` z repo YamBMS
+4. Jeśli włączasz panel WWW, dodaj do `secrets.yaml`:
+   - `web_server_username`
+   - `web_server_password`
 
 ### ❌ Problem: Brak danych z Seplos V3 (sniffer)
 

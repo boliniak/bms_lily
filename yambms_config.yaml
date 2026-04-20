@@ -16,7 +16,7 @@
 #
 # WYMAGANIA:
 # - Plik secrets.yaml z danymi WiFi (patrz sekcja WiFi poniżej)
-# - ESPHome w wersji 2024.x lub nowszej
+# - ESPHome w wersji 2025.11.0 lub nowszej (zalecane: najnowsza stabilna)
 # - Rezystory terminacyjne 120Ω na obu końcach magistrali RS485 i CAN
 #
 # NUMERACJA BMS:
@@ -203,8 +203,14 @@ substitutions:
 
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  PACKAGES — Importy modułów konfiguracji                                   ║
-# ║  Pakiety są pobierane automatycznie z repozytorium GitHub                  ║
+# ║  TRYB ZDALNY (REMOTE): pakiety są pobierane z repozytorium GitHub         ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# WAŻNE (diagnoza błędu walidacji YAML):
+# - W tej konfiguracji używany jest TRYB ZDALNY (url + files).
+# - W trybie zdalnym NIE trzeba kopiować lokalnego folderu 'packages/'.
+# - Jeśli przejdziesz na tryb lokalny (!include packages/...), skopiuj CAŁY katalog
+#   'packages/' z repozytorium YamBMS i zachowaj oryginalną strukturę katalogów.
 
 packages:
 
@@ -260,6 +266,7 @@ packages:
       - path: 'packages/board/board_options_PSRAM_octal_80Mhz.yaml'
 
       # Web Server — opcjonalny panel webowy na ESP32 (odkomentuj jeśli chcesz)
+      # WYMAGA secrets.yaml: web_server_username oraz web_server_password
       # - path: 'packages/yambms/yambms_web_server.yaml'
 
 
